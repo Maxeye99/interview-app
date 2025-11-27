@@ -2,8 +2,19 @@ import React, { useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BookOpen, User, Building, FileText, Send, ChevronRight, MessageSquare, Code, Users, HelpCircle, Download, CheckCircle, AlertCircle, Briefcase, Star, Target, Loader2, Layers, Sparkles, Plus } from 'lucide-react';
 
+// ==========================================
+// 🚀 DEPLOYMENT CONFIGURATION
+// ==========================================
 
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+// OPTION 1: PREVIEW MODE (Current - Easiest for testing)
+
+// OPTION 2: VERCEL DEPLOYMENT MODE (Secure)
+// If you want to use the secure Vercel Vault, comment out Option 1 
+// and uncomment the line below:
+ const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+
+// ==========================================
+
 // --- API Helpers ---
 
 const callGeminiAPI = async (inputs) => {
@@ -53,12 +64,13 @@ const callRefinementAPI = async (originalContext, refineQuery) => {
     INSTRUCTIONS:
     1. Generate a NEW section of content based strictly on the request.
     2. Output MUST be valid JSON with a 'title' and a 'content' array.
+    3. If generating questions, use 'type': 'qa' or 'question'.
     
     Output JSON Schema:
     {
       "title": "Title for this new section",
       "content": [ 
-        // Array of QA, Guides, or Scripts objects matching previous schema
+        // Array of objects. prefer type='qa' for questions.
       ]
     }
   `;
@@ -129,14 +141,19 @@ const OutputContent = ({ data }) => {
   return (
     <div className="space-y-6 animate-fadeIn">
       {data.map((item, idx) => {
-        // FIXED: Corrected Safety Check to include 'question' and 'stackName'
-        const hasContent = item.text || item.points || item.questions || item.items || item.goodAnswerPoints || item.goodAnswer || item.question || item.stackName;
+        // Safety check: Ensure something exists to render
+        const hasContent = item.text || item.points || item.questions || item.items || item.goodAnswerPoints || item.goodAnswer || item.question || item.stackName || item.answer;
         if (!hasContent) return null;
+
+        // Determine content type robustly
+        const isStackGroup = item.type === 'stack_group' || (item.stackName && item.questions);
+        const isQA = item.type === 'qa' || (item.question && (item.goodAnswer || item.goodAnswerPoints || item.badAnswerPoints));
+        const isSimpleQuestion = !isQA && !isStackGroup && item.question; // Fallback for simple Q&A
 
         return (
           <div key={idx} className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm space-y-4 print:shadow-none print:border-none print:p-0">
             
-            {item.type === 'stack_group' && (
+            {isStackGroup && (
                <div className="border-b border-gray-100 pb-2 mb-4">
                   <h3 className="text-xl font-bold text-blue-800 flex items-center gap-2">
                     <Code size={20} /> {item.stackName}
@@ -144,11 +161,10 @@ const OutputContent = ({ data }) => {
                </div>
             )}
 
-            {['guide', 'script', 'qa', 'list'].includes(item.type) && (
+            {['guide', 'script', 'list'].includes(item.type) && (
               <div className="flex items-center gap-2 mb-2">
                 {item.type === 'guide' && <BookOpen size={18} className="text-purple-500" />}
                 {item.type === 'script' && <MessageSquare size={18} className="text-green-500" />}
-                {item.type === 'qa' && <HelpCircle size={18} className="text-blue-500" />}
                 {item.type === 'list' && <Target size={18} className="text-orange-500" />}
                 <h3 className="font-bold text-gray-800 text-lg">{item.title || item.question}</h3>
               </div>
@@ -167,13 +183,14 @@ const OutputContent = ({ data }) => {
               </ul>
             )}
 
-            {item.type === 'stack_group' && item.questions && (
+            {/* Stack Group Questions */}
+            {isStackGroup && item.questions && (
               <div className="space-y-6">
                 {item.questions.map((q, i) => (
                   <div key={i} className="bg-gray-50 p-4 rounded-lg print:border print:border-gray-200">
                     <p className="font-semibold text-gray-800 mb-2">{i + 1}. {q.question}</p>
                     <ul className="ml-4 space-y-1">
-                      {q.answerPoints && q.answerPoints.map((ans, j) => (
+                      {(q.answerPoints || q.answer ? (q.answerPoints || [q.answer]) : []).map((ans, j) => (
                         <li key={j} className="text-sm text-gray-600 list-disc">{ans}</li>
                       ))}
                     </ul>
@@ -193,7 +210,8 @@ const OutputContent = ({ data }) => {
               </ul>
             )}
 
-            {item.type === 'qa' && (
+            {/* Advanced QA View (Good/Bad) */}
+            {isQA && (
               <div className="grid md:grid-cols-2 gap-4 mt-4 print:block print:space-y-4">
                 <div className="bg-green-50 p-4 rounded-lg border border-green-100 print:border-green-200">
                   <div className="flex items-center gap-2 text-green-700 font-semibold mb-2 text-sm">
@@ -209,20 +227,25 @@ const OutputContent = ({ data }) => {
                     <p className="text-sm text-green-800">{item.goodAnswer || item.insight}</p>
                   )}
                 </div>
-                <div className="bg-red-50 p-4 rounded-lg border border-red-100 print:border-red-200">
-                  <div className="flex items-center gap-2 text-red-700 font-semibold mb-2 text-sm">
-                    <AlertCircle size={16} /> Bad Approach
+                
+                {/* Only show Bad Approach if data exists */}
+                {(item.badAnswerPoints || item.badAnswer) && (
+                  <div className="bg-red-50 p-4 rounded-lg border border-red-100 print:border-red-200">
+                    <div className="flex items-center gap-2 text-red-700 font-semibold mb-2 text-sm">
+                      <AlertCircle size={16} /> Bad Approach
+                    </div>
+                    {item.badAnswerPoints ? (
+                       <ul className="list-disc ml-4 space-y-1">
+                         {item.badAnswerPoints.map((p, i) => (
+                           <li key={i} className="text-sm text-red-800">{p}</li>
+                         ))}
+                       </ul>
+                    ) : (
+                      <p className="text-sm text-red-800">{item.badAnswer}</p>
+                    )}
                   </div>
-                  {item.badAnswerPoints ? (
-                     <ul className="list-disc ml-4 space-y-1">
-                       {item.badAnswerPoints.map((p, i) => (
-                         <li key={i} className="text-sm text-red-800">{p}</li>
-                       ))}
-                     </ul>
-                  ) : (
-                    <p className="text-sm text-red-800">{item.badAnswer || "Avoiding the core of the question."}</p>
-                  )}
-                </div>
+                )}
+
                 {item.keywords && (
                   <div className="md:col-span-2 flex flex-wrap gap-2 mt-2 print:hidden">
                     <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Hit these keywords:</span>
@@ -233,6 +256,22 @@ const OutputContent = ({ data }) => {
                 )}
               </div>
             )}
+
+            {/* Simple/Fallback Question View */}
+            {isSimpleQuestion && (
+               <div className="bg-gray-50 p-4 rounded-lg mt-2">
+                  <p className="font-bold text-gray-800 mb-2 text-lg">{item.question}</p>
+                  {item.answer && <p className="text-sm text-gray-700 leading-relaxed">{item.answer}</p>}
+                  {item.answerPoints && (
+                    <ul className="ml-4 space-y-1">
+                      {item.answerPoints.map((ans, j) => (
+                        <li key={j} className="text-sm text-gray-700 list-disc">{ans}</li>
+                      ))}
+                    </ul>
+                  )}
+               </div>
+            )}
+
           </div>
         );
       })}
@@ -381,7 +420,7 @@ export default function InterviewPrepApp() {
             {/* Sidebar */}
             <div className="lg:col-span-4 space-y-4 sidebar print:hidden">
               <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl mb-2">
-                <h3 className="text-blue-900 font-bold text-lg mb-1 truncate">{generatedData.meta.role}</h3>
+                <h3 className="text-blue-900 font-bold text-lg mb-1">{generatedData.meta.role}</h3>
                 <p className="text-blue-600 text-sm">Strategy Guide</p>
               </div>
 
@@ -480,8 +519,10 @@ export default function InterviewPrepApp() {
   );
 }
 
+// ⚠️ THIS SECTION MUST BE ACTIVE FOR YOUR DEPLOYED SITE TO WORK ⚠️
+// Uncomment the following lines for local development and Vercel deployment
 ReactDOM.createRoot(document.getElementById('root')).render(
-<React.StrictMode>
-<InterviewPrepApp />
+   <React.StrictMode>
+     <InterviewPrepApp />
    </React.StrictMode>,
  )
